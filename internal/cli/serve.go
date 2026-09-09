@@ -72,6 +72,7 @@ func newServeCmd(g *globals) *cobra.Command {
 			tools.RegisterAPIResourcesTool(mcpServer, apiResourcesSvc)
 			tools.RegisterLogsTool(mcpServer, services.NewLogService(policy.New(cfg.Security), typedClients(provider, factory), int64(cfg.Limits.Logs.MaxTailLines), cfg.Limits.Logs.MaxBytes))
 			tools.RegisterEventsTool(mcpServer, services.NewEventService(policy.New(cfg.Security), typedClients(provider, factory), cfg.Limits.Events.MaxItems))
+			tools.RegisterMetricsTools(mcpServer, services.NewMetricsService(policy.New(cfg.Security), dynamicOnly(provider, factory)))
 			stdio := server.NewStdioServer(mcpServer)
 			g.logger.Info("mcp-k8s serving", "transport", "stdio", "version", version.Version)
 
@@ -152,5 +153,20 @@ func authzClients(provider kubernetes.ClusterProvider, factory *kubernetes.Clien
 			return nil, nil, err
 		}
 		return clients.Typed, clients.Discovery, nil
+	}
+}
+
+// dynamicOnly wires services.MetricsClients to provider+factory.
+func dynamicOnly(provider kubernetes.ClusterProvider, factory *kubernetes.ClientFactory) services.MetricsClients {
+	return func(ctx context.Context, cluster string) (dynamic.Interface, error) {
+		cfg, err := provider.Config(ctx, cluster)
+		if err != nil {
+			return nil, err
+		}
+		clients, err := factory.ForCluster(cluster, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return clients.Dynamic, nil
 	}
 }
