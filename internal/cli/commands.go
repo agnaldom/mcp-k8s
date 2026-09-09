@@ -11,22 +11,6 @@ import (
 // that does not exist — a validation failure, not a defaults situation.
 var errConfigNotFound = errors.New("config file not found (a missing file is not valid; create it or pass --config)")
 
-// newServeCmd is the stdio MCP server entrypoint. The actual MCP server
-// lands in step 03 (spec §13); this wires the command shape now.
-func newServeCmd(g *globals) *cobra.Command {
-	return &cobra.Command{
-		Use:   "serve",
-		Short: "Run the MCP server over stdio",
-		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if _, _, err := g.loadConfig(); err != nil {
-				return err
-			}
-			return errors.New("serve: MCP server not implemented yet (spec §13 step 03)")
-		},
-	}
-}
-
 // newDoctorCmd lands in step 19; the command shape exists from step 02 so
 // the CLI contract is complete early.
 func newDoctorCmd(g *globals) *cobra.Command {
