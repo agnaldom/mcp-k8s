@@ -14,6 +14,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	clientgo "k8s.io/client-go/kubernetes"
 
+	"github.com/agnaldom/mcp-k8s/internal/audit"
 	"github.com/agnaldom/mcp-k8s/internal/config"
 	"github.com/agnaldom/mcp-k8s/internal/kubernetes"
 	"github.com/agnaldom/mcp-k8s/internal/policy"
@@ -57,6 +58,11 @@ func newServeCmd(g *globals) *cobra.Command {
 				version.Version,
 				server.WithToolCapabilities(true),
 				server.WithLogging(),
+				// Audit trail for every invocation, even read-only
+				// (spec §10). Stdout belongs to MCP frames; audit
+				// lines go to stderr as JSONL alongside the
+				// structured logs.
+				server.WithToolHandlerMiddleware(audit.NewRecorder(os.Stderr).Middleware()),
 			)
 			tools.RegisterClusterTools(mcpServer, clusterSvc)
 			tools.RegisterNamespaceTools(mcpServer, namespaceSvc)
