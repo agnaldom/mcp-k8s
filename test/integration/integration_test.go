@@ -18,10 +18,12 @@ func TestFixtures(t *testing.T) {
 func TestHealthyDeployment(t *testing.T) {
 	e := loadEnv(t)
 	e.applyFixtures(t)
-	res := e.workloadContext(t, "Deployment", "healthy", false)
-	if res.Workload.Replicas == nil || res.Workload.Replicas.Available != 2 {
-		t.Errorf("healthy replicas: %+v", res.Workload.Replicas)
-	}
+	var res *workloadResultAlias
+	waitFor(t, "healthy deployment fully available", 4*time.Minute, func() bool {
+		res = e.workloadContext(t, "Deployment", "healthy", false)
+		return res.Workload.Replicas != nil && res.Workload.Replicas.Available == 2 &&
+			len(res.Relationships.Services) == 1 && res.Relationships.Services[0].ReadyEndpoints >= 1
+	})
 	if res.Pods.Total != 2 {
 		t.Errorf("healthy pods: %+v", res.Pods)
 	}
