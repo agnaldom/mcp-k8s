@@ -1,0 +1,67 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go mod tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: gofmt check
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "gofmt: these files need formatting:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: layer direction check (spec §15)
+        run: make layers
+
+      - name: unit tests
+        run: go test -race -short ./...
+
+      # Security regression tests (spec §11) live in this suite once the
+      # security controls land; they must block merge. The -short flag keeps
+      # unit tests fast; kind-based integration runs in the job below.
+      - name: security regression tests
+        run: go test -race -short -run 'Security' ./...
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: create kind cluster
+        uses: helm/kind-action@v1
+
+      # Integration tests are gated behind the "integration" build tag and
+      # the kind fixtures from spec §11.
+      - name: integration tests
+        run: go test -race -tags integration ./...
