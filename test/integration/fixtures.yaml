@@ -1,0 +1,224 @@
+# Integration fixtures (spec §11): one of each failure shape the signal
+# catalog detects, plus a healthy baseline. Applied to a kind cluster by
+# the integration test suite (build tag "integration").
+#
+# These fixtures later become the evals/ corpus for sre-agent — write
+# once, use in both projects.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mcp-k8s-fixtures
+---
+# 1. Healthy baseline: running pods behind a Service with endpoints.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: healthy
+  namespace: mcp-k8s-fixtures
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: healthy
+  template:
+    metadata:
+      labels:
+        app: healthy
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.28
+          command: ["sh", "-c", "while true; do sleep 5; done"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: healthy
+  namespace: mcp-k8s-fixtures
+spec:
+  selector:
+    app: healthy
+  ports:
+    - port: 80
+---
+# 2. CrashLoopBackOff: the container always exits non-zero.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crashloop
+  namespace: mcp-k8s-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: crashloop
+  template:
+    metadata:
+      labels:
+        app: crashloop
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.28
+          command: ["sh", "-c", "exit 1"]
+---
+# 3. OOMKilled: allocates past its memory limit.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oomkilled
+  namespace: mcp-k8s-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: oomkilled
+  template:
+    metadata:
+      labels:
+        app: oomkilled
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.28
+          command: ["sh", "-c", "dd if=/dev/zero of=/dev/null bs=64M"]
+          resources:
+            limits:
+              memory: 32Mi
+---
+# 4. ImagePullBackOff: the image does not exist.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: imagepull
+  namespace: mcp-k8s-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: imagepull
+  template:
+    metadata:
+      labels:
+        app: imagepull
+    spec:
+      containers:
+        - name: app
+          image: registry.k8s.io/does-not-exist:never
+---
+# 5. Pending for lack of resources: requests 100 cores.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pending-resources
+  namespace: mcp-k8s-fixtures
+  labels:
+    app: pending-resources
+spec:
+  containers:
+    - name: app
+      image: busybox:1.28
+      command: ["sh", "-c", "sleep 3600"]
+      resources:
+        requests:
+          cpu: "100"
+---
+# 6. Failing liveness probe: restarts forever.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: liveness-failing
+  namespace: mcp-k8s-fixtures
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: liveness-failing
+  template:
+    metadata:
+      labels:
+        app: liveness-failing
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.28
+          command: ["sh", "-c", "sleep 30"]
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "exit 1"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+# 7. Service without endpoints: selects the Pending pod (never ready).
+apiVersion: v1
+kind: Service
+metadata:
+  name: no-endpoints
+  namespace: mcp-k8s-fixtures
+spec:
+  selector:
+    app: pending-resources
+  ports:
+    - port: 80
+---
+# 8. PVC Pending on a storage class that does not exist, consumed by a pod.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-pending
+  namespace: mcp-k8s-fixtures
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: no-such-storage-class
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pvc-consumer
+  namespace: mcp-k8s-fixtures
+spec:
+  containers:
+    - name: app
+      image: busybox:1.28
+      command: ["sh", "-c", "sleep 3600"]
+      volumeMounts:
+        - name: data
+          mountPath: /data
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: pvc-pending
+---
+# 9. Failed Job: the task exits non-zero, no retries.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: failed-job
+  namespace: mcp-k8s-fixtures
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: task
+          image: busybox:1.28
+          command: ["sh", "-c", "exit 1"]
+---
+# 10. Multi-container pod.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: multi-container
+  namespace: mcp-k8s-fixtures
+spec:
+  containers:
+    - name: app
+      image: busybox:1.28
+      command: ["sh", "-c", "sleep 3600"]
+    - name: sidecar
+      image: busybox:1.28
+      command: ["sh", "-c", "sleep 3600"]
