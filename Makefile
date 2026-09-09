@@ -25,6 +25,14 @@ unit:
 integration:
 	$(GO) test -race -tags integration ./...
 
+## kind-up/kind-down: local integration environment
+kind-up:
+	kind create cluster --name mcp-k8s-integration
+	integration
+
+kind-down:
+	kind delete cluster --name mcp-k8s-integration
+
 ## lint: go vet plus gofmt check plus layer-direction check
 lint: vet fmt-check layers
 
