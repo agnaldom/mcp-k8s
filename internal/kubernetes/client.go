@@ -2,9 +2,11 @@ package kubernetes
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/discovery/cached/disk"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -31,15 +33,25 @@ type Clients struct {
 type ClientFactory struct {
 	QPS   float32
 	Burst int
+	// CacheDir enables the persistent discovery cache (spec §9). Empty
+	// means memory-only.
+	CacheDir string
 }
 
 func NewClientFactory(qps float32, burst int) *ClientFactory {
 	return &ClientFactory{QPS: qps, Burst: burst}
 }
 
-// ForConfig builds a fresh Clients for cfg. The input config is copied
-// before mutation, so callers keep ownership of theirs.
-func (f *ClientFactory) ForConfig(cfg *rest.Config) (*Clients, error) {
+// NewCachedClientFactory returns a factory that persists discovery per
+// cluster under baseDir with CacheTTL freshness.
+func NewCachedClientFactory(qps float32, burst int, baseDir string) *ClientFactory {
+	return &ClientFactory{QPS: qps, Burst: burst, CacheDir: baseDir}
+}
+
+// ForCluster builds a fresh Clients for one named cluster. The cluster
+// name scopes the disk cache and never appears in logs or responses. The
+// input config is copied before mutation, so callers keep ownership.
+func (f *ClientFactory) ForCluster(cluster string, cfg *rest.Config) (*Clients, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("nil rest.Config")
 	}
@@ -55,9 +67,26 @@ func (f *ClientFactory) ForConfig(cfg *rest.Config) (*Clients, error) {
 	if err != nil {
 		return nil, fmt.Errorf("dynamic client: %w", err)
 	}
-	disc, err := discovery.NewDiscoveryClientForConfig(limited)
+	var disc discovery.DiscoveryInterface
+	rawDisc, err := discovery.NewDiscoveryClientForConfig(limited)
 	if err != nil {
 		return nil, fmt.Errorf("discovery client: %w", err)
+	}
+	disc = rawDisc
+	if f.CacheDir != "" {
+		dir := clusterCacheDir(f.CacheDir, cluster)
+		httpDir := filepath.Join(dir, "http")
+		if err := ensurePrivateDir(dir); err != nil {
+			return nil, fmt.Errorf("discovery cache dir: %w", err)
+		}
+		if err := ensurePrivateDir(httpDir); err != nil {
+			return nil, fmt.Errorf("discovery http cache dir: %w", err)
+		}
+		cached, err := disk.NewCachedDiscoveryClientForConfig(limited, dir, httpDir, CacheTTL)
+		if err != nil {
+			return nil, fmt.Errorf("cached discovery client: %w", err)
+		}
+		disc = cached
 	}
 
 	return &Clients{
