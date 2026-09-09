@@ -12,7 +12,7 @@ all: build
 
 ## build: compile the binary into bin/
 build:
-	$(GO) build -o $(BIN_DIR)/$(BINARY) $(CMD)
+	$(GO) build -ldflags "-X github.com/agnaldom/mcp-k8s/internal/version.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev) -X github.com/agnaldom/mcp-k8s/internal/version.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none)" -o $(BIN_DIR)/$(BINARY) $(CMD)
 
 ## test: run unit and integration tests (integration requires kind)
 test: unit integration
