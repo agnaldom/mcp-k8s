@@ -9,9 +9,11 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
+	clientgo "k8s.io/client-go/kubernetes"
 
 	"github.com/agnaldom/mcp-k8s/internal/config"
 	"github.com/agnaldom/mcp-k8s/internal/kubernetes"
+	"github.com/agnaldom/mcp-k8s/internal/policy"
 	"github.com/agnaldom/mcp-k8s/internal/services"
 	"github.com/agnaldom/mcp-k8s/internal/tools"
 	"github.com/agnaldom/mcp-k8s/internal/version"
@@ -41,6 +43,10 @@ func newServeCmd(g *globals) *cobra.Command {
 
 			provider, factory := buildKubernetesWiring(cfg)
 			clusterSvc := &services.ClusterService{Provider: provider, Factory: factory}
+			namespaceSvc := &services.NamespaceService{
+				Policy:  policy.New(cfg.Security),
+				Clients: typedClients(provider, factory),
+			}
 
 			mcpServer := server.NewMCPServer(
 				"mcp-k8s",
@@ -49,6 +55,7 @@ func newServeCmd(g *globals) *cobra.Command {
 				server.WithLogging(),
 			)
 			tools.RegisterClusterTools(mcpServer, clusterSvc)
+			tools.RegisterNamespaceTools(mcpServer, namespaceSvc)
 			stdio := server.NewStdioServer(mcpServer)
 			g.logger.Info("mcp-k8s serving", "transport", "stdio", "version", version.Version)
 
@@ -81,4 +88,21 @@ func buildKubernetesWiring(cfg *config.Config) (kubernetes.ClusterProvider, *kub
 		cfg.Kubernetes.QPS, cfg.Kubernetes.Burst, kubernetes.DefaultCacheDir(),
 	)
 	return provider, factory
+}
+
+// typedClients wires a services.TypedClients to the provider+factory
+// chain: resolve the cluster's rest.Config, build the per-cluster bundle,
+// hand over the typed clientset. Never cached across calls.
+func typedClients(provider kubernetes.ClusterProvider, factory *kubernetes.ClientFactory) services.TypedClients {
+	return func(ctx context.Context, cluster string) (clientgo.Interface, error) {
+		cfg, err := provider.Config(ctx, cluster)
+		if err != nil {
+			return nil, err
+		}
+		clients, err := factory.ForCluster(cluster, cfg)
+		if err != nil {
+			return nil, err
+		}
+		return clients.Typed, nil
+	}
 }

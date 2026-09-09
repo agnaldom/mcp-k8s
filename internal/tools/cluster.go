@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/agnaldom/mcp-k8s/internal/kubernetes"
+	"github.com/agnaldom/mcp-k8s/internal/policy"
 	"github.com/agnaldom/mcp-k8s/internal/services"
 )
 
@@ -84,6 +85,8 @@ func mapError(err error) *Error {
 	case errors.Is(err, kubernetes.ErrClusterNotFound):
 		return NewError(ErrClusterNotFound, err.Error())
 	case errors.Is(err, kubernetes.ErrExecPluginBlocked):
+		return NewError(ErrPolicyDenied, err.Error())
+	case errors.Is(err, policy.ErrDenied):
 		return NewError(ErrPolicyDenied, err.Error())
 	default:
 		return NewError(ErrInternal, err.Error())
