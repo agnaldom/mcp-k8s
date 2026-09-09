@@ -152,3 +152,44 @@ func TestListPaginationFields(t *testing.T) {
 		t.Errorf("pagination contract: %+v", res)
 	}
 }
+
+func TestGetAppliesSecretPolicyBeforeResolution(t *testing.T) {
+	svc := newResourceService()
+	svc.Clients = func(_ context.Context, _ string) (dynamic.Interface, discovery.DiscoveryInterface, meta.RESTMapper, error) {
+		t.Error("clients must not be resolved for a policy-denied kind")
+		return nil, nil, nil, nil
+	}
+	_, err := svc.Get(context.Background(), ResourceGetOptions{
+		Cluster: "prod", Kind: "Secret", Name: "db-creds", Namespace: "payments", View: ViewSummary,
+	})
+	if !errors.Is(err, policy.ErrDenied) {
+		t.Fatalf("expected ErrDenied for Secret, got %v", err)
+	}
+}
+
+func TestGetReturnsSanitizedObject(t *testing.T) {
+	obj := deployment("payments-api", "payments", 3)
+	svc := newResourceService(obj)
+	item, err := svc.Get(context.Background(), ResourceGetOptions{
+		Cluster: "prod", Kind: "Deployment", Name: "payments-api", Namespace: "payments", View: ViewFull,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Metadata["name"] != "payments-api" {
+		t.Errorf("metadata: %+v", item.Metadata)
+	}
+	if item.Object == nil {
+		t.Error("full view must carry the object")
+	}
+}
+
+func TestGetNotFound(t *testing.T) {
+	svc := newResourceService()
+	_, err := svc.Get(context.Background(), ResourceGetOptions{
+		Cluster: "prod", Kind: "Deployment", Name: "ghost", Namespace: "payments", View: ViewSummary,
+	})
+	if !errors.Is(err, ErrResourceNotFound) {
+		t.Fatalf("expected ErrResourceNotFound, got %v", err)
+	}
+}

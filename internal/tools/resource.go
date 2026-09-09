@@ -70,6 +70,8 @@ func RegisterResourceListTool(s *server.MCPServer, svc resourceListService) {
 // specific sentinels.
 func mapResourceError(err error) *Error {
 	switch {
+	case errors.Is(err, services.ErrResourceNotFound):
+		return NewError(ErrResourceNotFound, err.Error())
 	case errors.Is(err, services.ErrResourceTypeNotFound):
 		return NewError(ErrResourceTypeNotFound, err.Error())
 	default:
@@ -78,4 +80,44 @@ func mapResourceError(err error) *Error {
 		}
 		return mapError(err)
 	}
+}
+
+// RegisterResourceGetTool adds k8s_resource_get (spec §13 step 10).
+func RegisterResourceGetTool(s *server.MCPServer, svc resourceGetService) {
+	s.AddTool(
+		mcp.NewTool("k8s_resource_get",
+			mcp.WithDescription("Get any Kind by name, sanitized, with view projection. Secret is blocked by policy."),
+			mcp.WithString("cluster", mcp.Required(), mcp.Description("Cluster name from k8s_cluster_list")),
+			mcp.WithString("kind", mcp.Required(), mcp.Description("Kind to get, e.g. Deployment, Pod")),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Resource name")),
+			mcp.WithString("namespace", mcp.Description("Namespace (required for namespaced kinds)")),
+			mcp.WithString("view", mcp.Description("Projection: summary (default) or full"), mcp.Enum(services.ViewSummary, services.ViewFull)),
+			readOnlyAnnotation(),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			start := time.Now()
+			cluster := req.GetString("cluster", "")
+			view := req.GetString("view", services.ViewSummary)
+			if view != services.ViewSummary && view != services.ViewFull {
+				return result(NewErrorEnvelope(Cluster{Name: cluster},
+					NewError(ErrInvalidArgument, `view must be "summary" or "full"`), Meta{Timestamp: start}))
+			}
+			item, err := svc.Get(ctx, services.ResourceGetOptions{
+				Cluster:   cluster,
+				Kind:      req.GetString("kind", ""),
+				Name:      req.GetString("name", ""),
+				Namespace: req.GetString("namespace", ""),
+				View:      view,
+			})
+			meta := Meta{Timestamp: start, DurationMs: time.Since(start).Milliseconds(), View: view}
+			if err != nil {
+				return result(NewErrorEnvelope(Cluster{Name: cluster}, mapResourceError(err), meta))
+			}
+			return result(NewEnvelope(Cluster{Name: cluster}, item, meta))
+		},
+	)
+}
+
+type resourceGetService interface {
+	Get(ctx context.Context, opts services.ResourceGetOptions) (*services.ListItem, error)
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -188,4 +189,63 @@ func metadataBlock(item *unstructured.Unstructured) map[string]any {
 		md["annotations"] = annotations
 	}
 	return md
+}
+
+// ErrResourceNotFound marks a missing named resource; the tools layer
+// maps it to RESOURCE_NOT_FOUND (spec §3.6).
+var ErrResourceNotFound = errors.New("resource not found")
+
+// ResourceGetOptions carries the validated k8s_resource_get arguments.
+type ResourceGetOptions struct {
+	Cluster   string
+	Kind      string
+	Name      string
+	Namespace string
+	View      string
+}
+
+// Get returns one resource by kind/name, after policy checks and
+// sanitization (spec §13 step 10). The Secret policy runs before any
+// cluster resolution: a denied Kind is refused even if RBAC would allow
+// it (spec §6.1).
+func (s *ResourceService) Get(ctx context.Context, opts ResourceGetOptions) (*ListItem, error) {
+	if err := s.Policy.ClusterAllowed(opts.Cluster); err != nil {
+		return nil, err
+	}
+	if err := s.Policy.ResourceAllowed(opts.Kind); err != nil {
+		return nil, err
+	}
+	if opts.Name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+
+	clients, disc, mapper, err := s.Clients(ctx, opts.Cluster)
+	if err != nil {
+		return nil, err
+	}
+	mapping, err := kubernetes.ResolveKind(disc, mapper, opts.Kind)
+	if err != nil {
+		if errors.Is(err, kubernetes.ErrResourceTypeNotFound) {
+			return nil, fmt.Errorf("%w: %q", ErrResourceTypeNotFound, opts.Kind)
+		}
+		return nil, err
+	}
+	gvr := mapping.Resource
+
+	var item *unstructured.Unstructured
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		item, err = clients.Resource(gvr).Namespace(opts.Namespace).Get(ctx, opts.Name, metav1.GetOptions{})
+	} else {
+		item, err = clients.Resource(gvr).Get(ctx, opts.Name, metav1.GetOptions{})
+	}
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("%w: %s/%s", ErrResourceNotFound, opts.Kind, opts.Name)
+		}
+		return nil, fmt.Errorf("get %s %q: %w", gvr.String(), opts.Name, err)
+	}
+
+	copy := item.DeepCopy()
+	kubernetes.SanitizeObject(copy)
+	return project(copy, opts.View, s.MaxObjectBytes)
 }
