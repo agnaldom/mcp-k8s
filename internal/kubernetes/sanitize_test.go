@@ -67,3 +67,63 @@ func TestSizeErrorMessage(t *testing.T) {
 		t.Errorf("error must tell the consumer how to recover (spec §3.5): %q", msg)
 	}
 }
+
+func TestSanitizeRedactsEnvValues(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"kind": "Pod",
+		"spec": map[string]any{
+			"containers": []any{
+				map[string]any{
+					"name": "api",
+					"env": []any{
+						map[string]any{"name": "DB_PASSWORD", "value": "super-secret"},
+						map[string]any{"name": "FROM_SECRET", "valueFrom": map[string]any{
+							"secretKeyRef": map[string]any{"name": "db-creds", "key": "password"},
+						}},
+					},
+				},
+			},
+			"initContainers": []any{
+				map[string]any{
+					"name": "migrate",
+					"env":  []any{map[string]any{"name": "TOKEN", "value": "abc123"}},
+				},
+			},
+		},
+	}}
+	SanitizeObject(obj)
+
+	containers, _, _ := unstructured.NestedSlice(obj.Object, "spec", "containers")
+	env := containers[0].(map[string]any)["env"].([]any)
+	if env[0].(map[string]any)["value"] != "[REDACTED]" {
+		t.Errorf("literal env value must be redacted, got %v", env[0])
+	}
+	vf := env[1].(map[string]any)["valueFrom"].(map[string]any)
+	ref := vf["secretKeyRef"].(map[string]any)
+	if ref["name"] != "db-creds" || ref["key"] != "password" {
+		t.Errorf("secretKeyRef must keep name+key, got %v", ref)
+	}
+
+	inits, _, _ := unstructured.NestedSlice(obj.Object, "spec", "initContainers")
+	initEnv := inits[0].(map[string]any)["env"].([]any)
+	if initEnv[0].(map[string]any)["value"] != "[REDACTED]" {
+		t.Error("initContainers env must be redacted too")
+	}
+}
+
+func TestSanitizeLeavesEnvWithoutValue(t *testing.T) {
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"kind": "Pod",
+		"spec": map[string]any{
+			"containers": []any{
+				map[string]any{"name": "api", "env": []any{map[string]any{"name": "ONLY_NAME"}}},
+			},
+		},
+	}}
+	SanitizeObject(obj)
+	containers, _, _ := unstructured.NestedSlice(obj.Object, "spec", "containers")
+	env := containers[0].(map[string]any)["env"].([]any)
+	if _, ok := env[0].(map[string]any)["value"]; ok {
+		t.Error("env without a literal value must stay untouched")
+	}
+}

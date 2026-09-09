@@ -59,13 +59,15 @@ func newServeCmd(g *globals) *cobra.Command {
 			)
 			tools.RegisterClusterTools(mcpServer, clusterSvc)
 			tools.RegisterNamespaceTools(mcpServer, namespaceSvc)
-			tools.RegisterResourceListTool(mcpServer, &services.ResourceService{
+			resourceSvc := &services.ResourceService{
 				Policy:         policy.New(cfg.Security),
 				Clients:        dynamicClients(provider, factory),
 				DefaultLimit:   cfg.Limits.List.DefaultLimit,
 				MaxLimit:       cfg.Limits.List.MaxLimit,
 				MaxObjectBytes: cfg.Limits.Response.MaxBytes,
-			})
+			}
+			tools.RegisterResourceListTool(mcpServer, resourceSvc)
+			tools.RegisterResourceGetTool(mcpServer, resourceSvc)
 			stdio := server.NewStdioServer(mcpServer)
 			g.logger.Info("mcp-k8s serving", "transport", "stdio", "version", version.Version)
 

@@ -65,6 +65,19 @@ func (p *Policy) NamespaceAllowed(name string) bool {
 	return true
 }
 
+// ResourceAllowed reports whether a Kind may be read at all. The deny
+// list exists because some types must stay blocked even when RBAC would
+// allow them — Secret foremost (spec §6.1): Secret.data/stringData are
+// never serialized, no matter the view.
+func (p *Policy) ResourceAllowed(kind string) error {
+	for _, d := range p.security.Resources.Deny {
+		if d == kind {
+			return fmt.Errorf("%w: resource %q is blocked by security.resources.deny (spec §6.1)", ErrDenied, kind)
+		}
+	}
+	return nil
+}
+
 // FilterNamespaces returns only the namespaces the policy permits,
 // preserving the input order.
 func (p *Policy) FilterNamespaces(names []string) []string {

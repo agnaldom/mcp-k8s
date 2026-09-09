@@ -75,3 +75,16 @@ func TestFilterNamespacesPreservesOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestResourceAllowedDeniesSecret(t *testing.T) {
+	p := New(config.Default().Security)
+	if err := p.ResourceAllowed("Secret"); !errors.Is(err, ErrDenied) {
+		t.Errorf("Secret must be denied by default (spec §6.1), got %v", err)
+	}
+	if err := p.ResourceAllowed("TokenRequest"); !errors.Is(err, ErrDenied) {
+		t.Errorf("TokenRequest must be denied by default, got %v", err)
+	}
+	if err := p.ResourceAllowed("Deployment"); err != nil {
+		t.Errorf("Deployment must be allowed, got %v", err)
+	}
+}
