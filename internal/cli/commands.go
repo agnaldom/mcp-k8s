@@ -3,29 +3,58 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/agnaldom/mcp-k8s/internal/doctor"
+	"github.com/agnaldom/mcp-k8s/internal/kubernetes"
 )
 
 // errConfigNotFound signals that config validate was pointed at a file
 // that does not exist — a validation failure, not a defaults situation.
 var errConfigNotFound = errors.New("config file not found (a missing file is not valid; create it or pass --config)")
 
-// newDoctorCmd lands in step 19; the command shape exists from step 02 so
-// the CLI contract is complete early.
+// newDoctorCmd implements `mcp-k8s doctor` (spec §12): the checks to
+// run first when something does not work. Exit code is non-zero when
+// any check fails.
 func newDoctorCmd(g *globals) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check config, connectivity, discovery, metrics, and permissions",
 		Args:  cobra.NoArgs,
-		RunE: func(_ *cobra.Command, _ []string) error {
-			if _, _, err := g.loadConfig(); err != nil {
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			cfg, _, err := g.loadConfig()
+			if err != nil {
 				return err
 			}
-			return errors.New("doctor: not implemented yet (spec §13 step 19)")
+			provider, factory := buildKubernetesWiring(cfg)
+			res := doctor.Run(cmd.Context(), doctor.Deps{
+				Cfg:            cfg,
+				Provider:       provider,
+				CacheDir:       kubernetes.DefaultCacheDir(),
+				Probe:          doctor.ProbeWith(provider, factory),
+				ClusterTimeout: cfg.Limits.RequestTimeout.Duration,
+			})
+			out := cmd.OutOrStdout()
+			for _, c := range res.Checks {
+				fmt.Fprintf(out, "[%s] %s", strings.ToUpper(c.Status), c.Name)
+				if c.Detail != "" {
+					fmt.Fprintf(out, ": %s", c.Detail)
+				}
+				fmt.Fprintln(out)
+			}
+			if res.Failed() {
+				return errDoctorFailed
+			}
+			return nil
 		},
 	}
 }
+
+// errDoctorFailed signals a non-zero exit for failing doctor checks;
+// the report itself is already printed.
+var errDoctorFailed = errors.New("doctor: one or more checks failed")
 
 func newClusterCmd(g *globals) *cobra.Command {
 	cluster := &cobra.Command{
