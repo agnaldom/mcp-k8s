@@ -9,6 +9,9 @@ import (
 
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	clientgo "k8s.io/client-go/kubernetes"
 
 	"github.com/agnaldom/mcp-k8s/internal/config"
@@ -56,6 +59,13 @@ func newServeCmd(g *globals) *cobra.Command {
 			)
 			tools.RegisterClusterTools(mcpServer, clusterSvc)
 			tools.RegisterNamespaceTools(mcpServer, namespaceSvc)
+			tools.RegisterResourceListTool(mcpServer, &services.ResourceService{
+				Policy:         policy.New(cfg.Security),
+				Clients:        dynamicClients(provider, factory),
+				DefaultLimit:   cfg.Limits.List.DefaultLimit,
+				MaxLimit:       cfg.Limits.List.MaxLimit,
+				MaxObjectBytes: cfg.Limits.Response.MaxBytes,
+			})
 			stdio := server.NewStdioServer(mcpServer)
 			g.logger.Info("mcp-k8s serving", "transport", "stdio", "version", version.Version)
 
@@ -104,5 +114,22 @@ func typedClients(provider kubernetes.ClusterProvider, factory *kubernetes.Clien
 			return nil, err
 		}
 		return clients.Typed, nil
+	}
+}
+
+// dynamicClients wires a services.DynamicClients to provider+factory:
+// resolve the cluster, build the bundle, hand over the dynamic client,
+// discovery, and RESTMapper.
+func dynamicClients(provider kubernetes.ClusterProvider, factory *kubernetes.ClientFactory) services.DynamicClients {
+	return func(ctx context.Context, cluster string) (dynamic.Interface, discovery.DiscoveryInterface, meta.RESTMapper, error) {
+		cfg, err := provider.Config(ctx, cluster)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		clients, err := factory.ForCluster(cluster, cfg)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		return clients.Dynamic, clients.Discovery, clients.Mapper, nil
 	}
 }
