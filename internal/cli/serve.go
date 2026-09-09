@@ -59,6 +59,7 @@ func newServeCmd(g *globals) *cobra.Command {
 			)
 			tools.RegisterClusterTools(mcpServer, clusterSvc)
 			tools.RegisterNamespaceTools(mcpServer, namespaceSvc)
+			apiResourcesSvc := services.NewAPIResourceService(policy.New(cfg.Security), authzClients(provider, factory))
 			resourceSvc := &services.ResourceService{
 				Policy:         policy.New(cfg.Security),
 				Clients:        dynamicClients(provider, factory),
@@ -68,6 +69,7 @@ func newServeCmd(g *globals) *cobra.Command {
 			}
 			tools.RegisterResourceListTool(mcpServer, resourceSvc)
 			tools.RegisterResourceGetTool(mcpServer, resourceSvc)
+			tools.RegisterAPIResourcesTool(mcpServer, apiResourcesSvc)
 			stdio := server.NewStdioServer(mcpServer)
 			g.logger.Info("mcp-k8s serving", "transport", "stdio", "version", version.Version)
 
@@ -133,5 +135,20 @@ func dynamicClients(provider kubernetes.ClusterProvider, factory *kubernetes.Cli
 			return nil, nil, nil, err
 		}
 		return clients.Dynamic, clients.Discovery, clients.Mapper, nil
+	}
+}
+
+// authzClients wires services.AuthzClients to provider+factory.
+func authzClients(provider kubernetes.ClusterProvider, factory *kubernetes.ClientFactory) services.AuthzClients {
+	return func(ctx context.Context, cluster string) (clientgo.Interface, discovery.DiscoveryInterface, error) {
+		cfg, err := provider.Config(ctx, cluster)
+		if err != nil {
+			return nil, nil, err
+		}
+		clients, err := factory.ForCluster(cluster, cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		return clients.Typed, clients.Discovery, nil
 	}
 }
