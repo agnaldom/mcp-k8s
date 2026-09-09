@@ -1,0 +1,16 @@
+# Build output
+/bin/
+/mcp-k8s
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+
+# Cache directory created at runtime by the server itself
+/.cache/
+
+# Editor/OS noise
+.DS_Store
+.idea/
+.vscode/
