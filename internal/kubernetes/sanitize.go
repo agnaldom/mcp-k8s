@@ -17,10 +17,15 @@ const maxAnnotationBytes = 4 * 1024
 // managedFields, last-applied-configuration, and oversized annotations.
 // It also enforces the secret controls (spec §6.1): literal env values
 // become [REDACTED]; secretKeyRef keeps the secret and key names, never
-// a resolved value. It mutates the copy it is given.
+// a resolved value; Secret data/stringData are dropped entirely. It
+// mutates the copy it is given.
 func SanitizeObject(obj *unstructured.Unstructured) {
 	unstructured.RemoveNestedField(obj.Object, "metadata", "managedFields")
 	redactContainerEnv(obj.Object)
+	if obj.GetKind() == "Secret" {
+		unstructured.RemoveNestedField(obj.Object, "data")
+		unstructured.RemoveNestedField(obj.Object, "stringData")
+	}
 
 	annotations := obj.GetAnnotations()
 	if len(annotations) == 0 {
