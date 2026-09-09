@@ -72,7 +72,8 @@ func newServeCmd(g *globals) *cobra.Command {
 			tools.RegisterResourceGetTool(mcpServer, resourceSvc)
 			tools.RegisterAPIResourcesTool(mcpServer, apiResourcesSvc)
 			tools.RegisterLogsTool(mcpServer, services.NewLogService(policy.New(cfg.Security), typedClients(provider, factory), int64(cfg.Limits.Logs.MaxTailLines), cfg.Limits.Logs.MaxBytes))
-			tools.RegisterEventsTool(mcpServer, services.NewEventService(policy.New(cfg.Security), typedClients(provider, factory), cfg.Limits.Events.MaxItems))
+			eventsSvc := services.NewEventService(policy.New(cfg.Security), typedClients(provider, factory), cfg.Limits.Events.MaxItems)
+			tools.RegisterEventsTool(mcpServer, eventsSvc)
 			tools.RegisterMetricsTools(mcpServer, services.NewMetricsService(policy.New(cfg.Security), dynamicOnly(provider, factory)))
 			relationshipSvc := services.NewRelationshipService(policy.New(cfg.Security), dynamicClients(provider, factory))
 			signalsSvc := services.NewSignalService(
@@ -84,6 +85,17 @@ func newServeCmd(g *globals) *cobra.Command {
 				cfg.Limits.Workload.MaxPods,
 			)
 			tools.RegisterSignalsTool(mcpServer, signalsSvc)
+			workloadSvc := services.NewWorkloadService(
+				policy.New(cfg.Security),
+				dynamicClients(provider, factory),
+				services.NewMetricsService(policy.New(cfg.Security), dynamicOnly(provider, factory)),
+				relationshipSvc,
+				eventsSvc,
+				signals.ThresholdsFrom(cfg.Signals),
+				cfg.Limits.Workload.MaxPods,
+				cfg.Limits.Workload.MaxConcurrentK8sRequests,
+			)
+			tools.RegisterWorkloadContextTool(mcpServer, workloadSvc)
 			stdio := server.NewStdioServer(mcpServer)
 			g.logger.Info("mcp-k8s serving", "transport", "stdio", "version", version.Version)
 

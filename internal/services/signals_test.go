@@ -63,6 +63,7 @@ func signalsPod() *corev1.Pod {
 			}},
 		},
 		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
 			Conditions: []corev1.PodCondition{{
 				Type:               corev1.PodReady,
 				Status:             corev1.ConditionFalse,

@@ -171,32 +171,47 @@ func (s *SignalService) workloadPods(ctx context.Context, clients dynamic.Interf
 	if ns == "" || len(labelMap) == 0 {
 		return nil
 	}
-	list, err := clients.Resource(gvrPods).Namespace(ns).List(ctx, metav1.ListOptions{
-		LabelSelector: labels.Set(labelMap).String(),
-	})
+	pods, err := listPodsByLabels(ctx, clients, ns, labelMap)
 	if err != nil {
 		out.Unavailable = append(out.Unavailable, fmt.Sprintf("pods: %v", err))
 		return nil
 	}
-	limit := len(list.Items)
-	if limit > s.MaxPods {
-		limit = s.MaxPods
-		out.Unavailable = append(out.Unavailable, fmt.Sprintf("pods: evaluated first %d of %d (maxPods)", s.MaxPods, len(list.Items)))
+	if len(pods) > s.MaxPods {
+		out.Unavailable = append(out.Unavailable, fmt.Sprintf("pods: evaluated first %d of %d (maxPods)", s.MaxPods, len(pods)))
+		return pods[:s.MaxPods]
 	}
-	pods := make([]corev1.Pod, 0, limit)
-	for i := 0; i < limit; i++ {
+	return pods
+}
+
+// listPodsByLabels lists the pods carrying every label in labelMap and
+// converts them to the typed shape.
+func listPodsByLabels(ctx context.Context, clients dynamic.Interface, ns string, labelMap map[string]string) ([]corev1.Pod, error) {
+	list, err := clients.Resource(gvrPods).Namespace(ns).List(ctx, metav1.ListOptions{
+		LabelSelector: labels.Set(labelMap).String(),
+	})
+	if err != nil {
+		return nil, err
+	}
+	pods := make([]corev1.Pod, 0, len(list.Items))
+	for i := range list.Items {
 		var pod corev1.Pod
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[i].Object, &pod); err != nil {
 			continue
 		}
 		pods = append(pods, pod)
 	}
-	return pods
+	return pods, nil
 }
 
 // checkNodes evaluates node_not_ready for every distinct node hosting a
 // workload pod. Node reads that fail are recorded, not fatal.
 func (s *SignalService) checkNodes(ctx context.Context, clients dynamic.Interface, pods []corev1.Pod) []signals.Signal {
+	return checkNodesReady(ctx, clients, pods)
+}
+
+// checkNodesReady evaluates node_not_ready for every distinct node
+// hosting one of the pods.
+func checkNodesReady(ctx context.Context, clients dynamic.Interface, pods []corev1.Pod) []signals.Signal {
 	seen := map[string]bool{}
 	var out []signals.Signal
 	for i := range pods {
@@ -220,6 +235,11 @@ func (s *SignalService) checkNodes(ctx context.Context, clients dynamic.Interfac
 
 // checkPVC reads one claim and evaluates pvc_pending.
 func (s *SignalService) checkPVC(ctx context.Context, clients dynamic.Interface, ns, name string) []signals.Signal {
+	return checkClaimPending(ctx, clients, ns, name, s.now(), s.Thresholds)
+}
+
+// checkClaimPending reads one claim and evaluates pvc_pending at now.
+func checkClaimPending(ctx context.Context, clients dynamic.Interface, ns, name string, now time.Time, th signals.Thresholds) []signals.Signal {
 	u, err := clients.Resource(gvrPVC).Namespace(ns).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
 		return nil
@@ -232,7 +252,7 @@ func (s *SignalService) checkPVC(ctx context.Context, clients dynamic.Interface,
 	if phase == string(corev1.ClaimPending) {
 		pendingSince = u.GetCreationTimestamp().Time
 	}
-	return signals.CheckPVC(ns, name, corev1.PersistentVolumeClaimPhase(phase), pendingSince, s.now(), s.Thresholds)
+	return signals.CheckPVC(ns, name, corev1.PersistentVolumeClaimPhase(phase), pendingSince, now, th)
 }
 
 // checkMemory evaluates memory_near_limit for every workload pod
@@ -252,6 +272,13 @@ func (s *SignalService) checkMemory(ctx context.Context, cluster, ns string, pod
 		out.Unavailable = append(out.Unavailable, fmt.Sprintf("metrics: %v", err))
 		return
 	}
+	usageByPod := memoryUsageByPod(list)
+	out.Signals = append(out.Signals, memoryPressureSignals(pods, usageByPod, s.Thresholds)...)
+}
+
+// memoryUsageByPod parses a metrics.k8s.io PodMetricsList into
+// pod name -> container -> memory bytes.
+func memoryUsageByPod(list *unstructured.UnstructuredList) map[string]map[string]int64 {
 	usageByPod := map[string]map[string]int64{} // pod name -> container -> bytes
 	for i := range list.Items {
 		podName := list.Items[i].GetName()
@@ -279,6 +306,13 @@ func (s *SignalService) checkMemory(ctx context.Context, cluster, ns string, pod
 			usageByPod[podName][name] = q.Value()
 		}
 	}
+	return usageByPod
+}
+
+// memoryPressureSignals evaluates memory_near_limit for every container
+// that declares a memory limit.
+func memoryPressureSignals(pods []corev1.Pod, usageByPod map[string]map[string]int64, th signals.Thresholds) []signals.Signal {
+	var out []signals.Signal
 	for i := range pods {
 		pod := &pods[i]
 		usage := usageByPod[pod.Name]
@@ -295,9 +329,10 @@ func (s *SignalService) checkMemory(ctx context.Context, cluster, ns string, pod
 				continue
 			}
 			ref := fmt.Sprintf("pod/%s/%s", pod.Namespace, pod.Name)
-			out.Signals = append(out.Signals, signals.CheckMemory(ref, c.Name, used, limit.Value(), s.Thresholds)...)
+			out = append(out, signals.CheckMemory(ref, c.Name, used, limit.Value(), th)...)
 		}
 	}
+	return out
 }
 
 // desiredReplicas and availableReplicas read the replica counters from
