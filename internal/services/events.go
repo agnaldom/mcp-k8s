@@ -41,6 +41,9 @@ type EventsOptions struct {
 	Namespace string // empty = all namespaces
 	// Since narrows the window; nil means everything available.
 	Since *time.Duration
+	// Limit caps the newest events returned, below the service maximum.
+	// Zero means the service maximum.
+	Limit int
 }
 
 // EventsResult is the data block plus coverage for k8s_events_list.
@@ -124,8 +127,12 @@ func (s *EventService) Events(ctx context.Context, opts EventsOptions) (*EventsR
 	})
 
 	// Keep the newest MaxItems; the oldest kept defines coverage.from.
-	if len(events) > s.MaxItems {
-		events = events[len(events)-s.MaxItems:]
+	maxItems := s.MaxItems
+	if opts.Limit > 0 && opts.Limit < maxItems {
+		maxItems = opts.Limit
+	}
+	if len(events) > maxItems {
+		events = events[len(events)-maxItems:]
 	}
 
 	now := s.now()
