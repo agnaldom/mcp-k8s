@@ -44,9 +44,11 @@ without an explicit decision recorded in the spec.
   2. **Open a new branch** named after the issue, e.g.
      `git checkout -b 02-cobra-cli-config-logging main`.
   3. Implement and verify (`make ci`).
-  4. **Open a PR** that references and closes the issue
-     (`Closes #N` in the PR body) and get it merged.
-  5. Close the issue when the PR is merged and the step is verified.
+  4. **Open a PR** with **`Closes #N` in the PR body** so GitHub links the
+     PR to the issue. One PR per issue.
+  5. **When the PR is merged, the issue closes automatically** — verify
+     afterwards that the issue is indeed closed; never close an issue
+     manually before its PR is merged.
 - Follow spec §13 roughly in order; steps #7 onward are individually usable as
   soon as they land.
 - **Security controls are merge-blocking.** Changes touching sanitization,
