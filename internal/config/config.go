@@ -236,5 +236,14 @@ func (c *Config) Validate() error {
 	if s := c.Signals.MemoryNearLimit; s != nil && (s.Ratio <= 0 || s.Ratio > 1) {
 		return fmt.Errorf("signals.memory_near_limit.ratio must be in (0, 1]")
 	}
+	if s := c.Signals.ContainerNotReady; s != nil && s.NotReadyFor.Duration <= 0 {
+		return fmt.Errorf("signals.container_not_ready.notReadyFor must be > 0")
+	}
+	if s := c.Signals.HighRestartCount; s != nil && (s.Threshold <= 0 || s.Window.Duration <= 0) {
+		return fmt.Errorf("signals.high_restart_count.threshold and window must be > 0")
+	}
+	if s := c.Signals.PVCPending; s != nil && s.PendingFor.Duration <= 0 {
+		return fmt.Errorf("signals.pvc_pending.pendingFor must be > 0")
+	}
 	return nil
 }

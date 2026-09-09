@@ -18,6 +18,7 @@ import (
 	"github.com/agnaldom/mcp-k8s/internal/kubernetes"
 	"github.com/agnaldom/mcp-k8s/internal/policy"
 	"github.com/agnaldom/mcp-k8s/internal/services"
+	"github.com/agnaldom/mcp-k8s/internal/signals"
 	"github.com/agnaldom/mcp-k8s/internal/tools"
 	"github.com/agnaldom/mcp-k8s/internal/version"
 )
@@ -73,6 +74,16 @@ func newServeCmd(g *globals) *cobra.Command {
 			tools.RegisterLogsTool(mcpServer, services.NewLogService(policy.New(cfg.Security), typedClients(provider, factory), int64(cfg.Limits.Logs.MaxTailLines), cfg.Limits.Logs.MaxBytes))
 			tools.RegisterEventsTool(mcpServer, services.NewEventService(policy.New(cfg.Security), typedClients(provider, factory), cfg.Limits.Events.MaxItems))
 			tools.RegisterMetricsTools(mcpServer, services.NewMetricsService(policy.New(cfg.Security), dynamicOnly(provider, factory)))
+			relationshipSvc := services.NewRelationshipService(policy.New(cfg.Security), dynamicClients(provider, factory))
+			signalsSvc := services.NewSignalService(
+				policy.New(cfg.Security),
+				dynamicClients(provider, factory),
+				dynamicOnly(provider, factory),
+				relationshipSvc,
+				signals.ThresholdsFrom(cfg.Signals),
+				cfg.Limits.Workload.MaxPods,
+			)
+			tools.RegisterSignalsTool(mcpServer, signalsSvc)
 			stdio := server.NewStdioServer(mcpServer)
 			g.logger.Info("mcp-k8s serving", "transport", "stdio", "version", version.Version)
 
