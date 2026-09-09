@@ -10,6 +10,10 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 	"github.com/spf13/cobra"
 
+	"github.com/agnaldom/mcp-k8s/internal/config"
+	"github.com/agnaldom/mcp-k8s/internal/kubernetes"
+	"github.com/agnaldom/mcp-k8s/internal/services"
+	"github.com/agnaldom/mcp-k8s/internal/tools"
 	"github.com/agnaldom/mcp-k8s/internal/version"
 )
 
@@ -27,21 +31,24 @@ func newServeCmd(g *globals) *cobra.Command {
 			if transport != "stdio" {
 				return fmt.Errorf("unsupported --transport %q: v0.1 speaks stdio only (spec §2)", transport)
 			}
-			if _, _, err := g.loadConfig(); err != nil {
+			cfg, _, err := g.loadConfig()
+			if err != nil {
 				return err
 			}
 
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 
+			provider, factory := buildKubernetesWiring(cfg)
+			clusterSvc := &services.ClusterService{Provider: provider, Factory: factory}
+
 			mcpServer := server.NewMCPServer(
 				"mcp-k8s",
 				version.Version,
-				// v0.1 ships no tools until step 07; capabilities are
-				// re-enabled as the catalog lands.
-				server.WithToolCapabilities(false),
+				server.WithToolCapabilities(true),
 				server.WithLogging(),
 			)
+			tools.RegisterClusterTools(mcpServer, clusterSvc)
 			stdio := server.NewStdioServer(mcpServer)
 			g.logger.Info("mcp-k8s serving", "transport", "stdio", "version", version.Version)
 
@@ -56,4 +63,22 @@ func newServeCmd(g *globals) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&transport, "transport", "stdio", "transport: stdio (the only option in v0.1)")
 	return cmd
+}
+
+// buildKubernetesWiring assembles the kubernetes-layer objects for the
+// MCP server: which provider exposes clusters, and the client factory
+// with rate limits and the persistent discovery cache (spec §8/§9).
+func buildKubernetesWiring(cfg *config.Config) (kubernetes.ClusterProvider, *kubernetes.ClientFactory) {
+	var provider kubernetes.ClusterProvider
+	if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
+		provider = &kubernetes.InClusterProvider{}
+	} else {
+		provider = &kubernetes.KubeconfigProvider{
+			AllowExecPlugins: cfg.Security.Kubeconfig.AllowExecPlugins,
+		}
+	}
+	factory := kubernetes.NewCachedClientFactory(
+		cfg.Kubernetes.QPS, cfg.Kubernetes.Burst, kubernetes.DefaultCacheDir(),
+	)
+	return provider, factory
 }
