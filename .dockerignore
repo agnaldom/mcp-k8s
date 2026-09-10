@@ -1,0 +1,10 @@
+# Keep the build context small and reproducible: no VCS state, no local
+# binaries, caches, or integration test artifacts.
+.git
+bin
+.cache
+**/*_test.go
+test
+spec.md
+Dockerfile
+.dockerignore

@@ -88,7 +88,7 @@ Two tools that deliberately **don't** exist: `k8s_context_list`/`k8s_context_cur
 - kubeconfig, tokens, and certificates never appear in responses or logs; exec credential plugins are disabled by default (`allowExecPlugins: false`).
 - The audit log records tool, cluster, namespace, resource, result, duration, and bytes out — never content, tokens, or credentials.
 
-**Defense in depth (explicitly not a control):** secret redaction inside log *content* (Bearer tokens, JWTs, PEM keys, connection strings) is best-effort regex over arbitrary application text. The real control is RBAC — don't grant `pods/log` broadly. Redaction reduces damage when a log was already read; it does not authorize reading it.
+**Defense in depth, not a control:** secret redaction inside log *content* (Bearer tokens, JWTs, PEM keys, connection strings) is best-effort regex over arbitrary application text with a high, unmeasurable false-negative rate. Calling it a control produces false confidence. **The real control is RBAC — don't grant `pods/log` broadly.** Redaction reduces damage when a log was already read; it does not authorize reading it. See [docs/threat-model.md](docs/threat-model.md).
 
 ## Configuration
 
@@ -220,9 +220,11 @@ Any client that supports local stdio MCP servers accepts the same universal JSON
 
 ## Deployment notes
 
-- **RBAC:** grant a minimal read-only permission set; never grant `pods/log` broadly — that is the real log-secrecy control.
+- **Container:** the multi-stage `Dockerfile` ships a static binary on `gcr.io/distroless/static:nonroot` — no shell, no kubectl, no package manager, running as UID 65532. Build with `make image` (or `docker build --build-arg VERSION=$(git describe --tags --always) -t mcp-k8s .`).
+- **RBAC:** `deploy/rbac.yaml` contains the ServiceAccount, ClusterRole and ClusterRoleBinding with the minimal read-only set covering the tool catalog. It deliberately omits `secrets` and `pods/log` — never grant `pods/log` broadly, that is the real log-secrecy control (see [docs/threat-model.md](docs/threat-model.md)).
+- **Read-only scope:** the binary has no hidden `--allow-write` flag; writes ship later as a separate binary with a separate ServiceAccount and separate RBAC.
 - **Cache:** discovery is cached on disk at `~/.cache/mcp-k8s/` (0700/0600) so clients that spawn the server per command get instant subsequent calls.
-- **In-cluster:** run with a dedicated ServiceAccount, mount the RBAC manifests, and set the in-cluster provider in config.
+- **In-cluster:** run with the dedicated `mcp-k8s` ServiceAccount, apply `deploy/rbac.yaml`, and set the in-cluster provider in config.
 
 ## Roadmap
 
