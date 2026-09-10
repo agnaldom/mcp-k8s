@@ -2,17 +2,26 @@ MODULE   := github.com/agnaldom/mcp-k8s
 BINARY   := mcp-k8s
 CMD      := ./cmd/mcp-k8s
 BIN_DIR  := ./bin
+IMAGE    ?= mcp-k8s
 
 GO      ?= go
 GOFMT   ?= gofmt
+DOCKER  ?= docker
 
-.PHONY: all build test unit integration lint fmt vet tidy clean ci
+.PHONY: all build image test unit integration lint fmt vet tidy clean ci
 
 all: build
 
 ## build: compile the binary into bin/
 build:
 	$(GO) build -ldflags "-X github.com/agnaldom/mcp-k8s/internal/version.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev) -X github.com/agnaldom/mcp-k8s/internal/version.Commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none)" -o $(BIN_DIR)/$(BINARY) $(CMD)
+
+## image: build the distroless container image (spec §2, §6.2)
+image:
+	$(DOCKER) build \
+		--build-arg VERSION=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev) \
+		--build-arg COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo none) \
+		-t $(IMAGE) .
 
 ## test: run unit and integration tests (integration requires kind)
 test: unit integration

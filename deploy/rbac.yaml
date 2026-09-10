@@ -1,0 +1,84 @@
+# RBAC for mcp-k8s (spec §2, §6.2).
+#
+# Scope: read-only, covering exactly the tool catalog. There is no hidden
+# --allow-write flag in the binary; when writes come they ship as a
+# separate binary with a separate ServiceAccount and separate RBAC.
+#
+# Deliberately NOT granted:
+#   - secrets: policy blocks the kind, and RBAC refusing it is the
+#     second line of defense (spec §6.1)
+#   - any write verb (create/update/patch/delete): the server is
+#     read-only end to end
+#   - pods/log is NOT in the ClusterRole: log secrecy is enforced by
+#     not granting it broadly (spec §6.2). Grant it per-namespace with
+#     an additional RoleBinding only where an operator accepts the risk.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: mcp-k8s
+  namespace: mcp-k8s
+  labels:
+    app.kubernetes.io/name: mcp-k8s
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: mcp-k8s:read
+  labels:
+    app.kubernetes.io/name: mcp-k8s
+rules:
+  # Core resources used by k8s_resource_list/get, k8s_namespace_list,
+  # k8s_workload_context, k8s_signals and k8s_events_list.
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - endpoints
+      - namespaces
+      - nodes
+      - persistentvolumeclaims
+      - persistentvolumes
+      - configmaps
+      - replicationcontrollers
+    verbs: [get, list, watch]
+  # events.k8s.io is the GA API for k8s_events_list.
+  - apiGroups: ["events.k8s.io"]
+    resources: [events]
+    verbs: [get, list, watch]
+  # Workloads for k8s_workload_context and k8s_signals.
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - daemonsets
+      - statefulsets
+    verbs: [get, list, watch]
+  - apiGroups: ["batch"]
+    resources: [jobs, cronjobs]
+    verbs: [get, list, watch]
+  # metrics-server APIs for k8s_metrics_nodes / k8s_metrics_pods.
+  # Harmless when metrics-server is absent: those tools report the
+  # capability as unavailable instead of failing.
+  - apiGroups: ["metrics.k8s.io"]
+    resources: [nodes, pods]
+    verbs: [get, list]
+  # SelfSubjectAccessReview backs k8s_api_resources and doctor: the
+  # server reports effective permissions instead of guessing.
+  - apiGroups: ["authorization.k8s.io"]
+    resources: [selfsubjectaccessreviews]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: mcp-k8s:read
+  labels:
+    app.kubernetes.io/name: mcp-k8s
+subjects:
+  - kind: ServiceAccount
+    name: mcp-k8s
+    namespace: mcp-k8s
+roleRef:
+  kind: ClusterRole
+  name: mcp-k8s:read
+  apiGroup: rbac.authorization.k8s.io
